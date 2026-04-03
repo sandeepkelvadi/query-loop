@@ -94,6 +94,8 @@ npm run build
 npm run example
 ```
 
+> **Note:** The mock model just echoes input. To use a real LLM, extend `BaseModelAdapter` and implement `complete()`.
+
 ## License
 
 MIT
