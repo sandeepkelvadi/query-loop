@@ -1,14 +1,21 @@
-import { createQueryLoop, builtinTools } from './index.js'
+import { createQueryLoop, builtinTools, createAnthropicAdapter } from './index.js'
 
 async function main() {
-  console.log('=== Query Loop Example ===\n')
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    console.error('Please set ANTHROPIC_API_KEY environment variable')
+    console.log('Usage: ANTHROPIC_API_KEY=sk-ant-... npm run example')
+    process.exit(1)
+  }
 
-  const queryLoop = createQueryLoop(builtinTools, { maxTurns: 5 })
+  console.log('=== Query Loop with Anthropic Adapter ===\n')
 
-  const prompt = 'Create a file called hello.txt with "Hello, World!" and then read it back'
+  const adapter = createAnthropicAdapter({ apiKey })
+  const queryLoop = createQueryLoop(builtinTools, { maxTurns: 5 }, adapter)
 
+  const prompt = 'Say hello and tell me the current date'
   console.log(`User: ${prompt}\n`)
-  console.log('Assistant:')
+  console.log('Assistant:\n')
 
   let fullResponse = ''
 
@@ -20,23 +27,20 @@ async function main() {
         break
       case 'tool_use':
         console.log(`\n[TOOL CALL: ${event.toolCall.name}]`)
-        console.log(JSON.stringify(event.toolCall.input, null, 2))
         break
       case 'tool_result':
         console.log(`\n[TOOL RESULT]: ${event.result.content.slice(0, 100)}...`)
         break
       case 'turn_end':
-        console.log(`\n[Turn ${event.turnCount} complete]`)
+        console.log('\n[Turn complete]')
         break
       case 'complete':
-        console.log(`\n\n=== FINAL RESPONSE ===\n${event.finalContent}`)
+        console.log(`\n\n=== DONE ===`)
         break
     }
   }
 
-  console.log('\n=== Query Loop Stats ===')
-  console.log(`Total messages: ${queryLoop.getMessages().length}`)
-  console.log(`Abort method available:`, typeof queryLoop.abort === 'function')
+  console.log(`\nTotal messages: ${queryLoop.getMessages().length}`)
 }
 
 main().catch(console.error)
