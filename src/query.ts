@@ -3,11 +3,13 @@ import type { Message, ToolUseBlock, ToolResultBlock } from './types.js'
 import { createToolResultMessage, extractToolUseBlocks, hasToolCalls, messageToString } from './message.js'
 import { createToolExecutor } from './toolOrchestration.js'
 import type { Tool, ToolContext } from './tool.js'
+import type { PermissionSystem } from './permissions.js'
 
 export type QueryOptions = {
   maxTurns?: number
   temperature?: number
   systemPrompt?: string
+  permissionSystem?: PermissionSystem
 }
 
 type QueryState = {
@@ -31,6 +33,7 @@ export type MessageStreamEvent =
   | { type: 'tool_use'; toolCall: ToolUseBlock }
   | { type: 'tool_progress'; toolUseId: string; content: string }
   | { type: 'tool_result'; result: ToolResultBlock }
+  | { type: 'tool_denied'; toolName: string; reason: string }
   | { type: 'turn_end'; turnCount: number }
   | { type: 'complete'; finalContent: string }
 
@@ -204,8 +207,40 @@ export class QueryLoop {
         toolState: new Map(),
       }
 
+      const allowedToolCalls: ToolUseBlock[] = []
+      const deniedTools: Array<{ name: string; reason: string }> = []
+
+      for (const toolCall of toolCalls) {
+        const permission = this.config.permissionSystem?.checkPermission(
+          toolCall.name,
+          toolCall.input
+        )
+        if (permission?.allowed === false) {
+          deniedTools.push({ name: toolCall.name, reason: permission.reason })
+          const deniedResult: ToolResultBlock = {
+            toolUseId: toolCall.id,
+            content: `Permission denied: ${permission.reason}`,
+            isError: true,
+          }
+          yield { type: 'tool_denied', toolName: toolCall.name, reason: permission.reason }
+          yield { type: 'tool_result', result: deniedResult }
+          this.state.messages.push(createToolResultMessage(
+            toolCall.id,
+            deniedResult.content,
+            true
+          ))
+        } else {
+          allowedToolCalls.push(toolCall)
+        }
+      }
+
+      if (allowedToolCalls.length === 0) {
+        yield { type: 'turn_end', turnCount: this.state.turnCount }
+        continue
+      }
+
       const toolResultIterator = this.executor.runToolUseBlocks(
-        toolCalls,
+        allowedToolCalls,
         this.tools,
         toolContext
       )

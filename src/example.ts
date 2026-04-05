@@ -1,4 +1,4 @@
-import { createQueryLoop, builtinTools, createAnthropicAdapter } from './index.js'
+import { createQueryLoop, builtinTools, createAnthropicAdapter, createSecurePermissionSystem } from './index.js'
 
 async function main() {
   const apiKey = process.env.ANTHROPIC_API_KEY
@@ -8,12 +8,19 @@ async function main() {
     process.exit(1)
   }
 
-  console.log('=== Query Loop with Streaming ===\n')
+  console.log('=== Query Loop with Permission System ===\n')
 
   const adapter = createAnthropicAdapter({ apiKey })
-  const queryLoop = createQueryLoop(builtinTools, { maxTurns: 5 }, adapter)
+  const permissions = createSecurePermissionSystem()
 
-  const prompt = 'Say hello and tell me the current date and time'
+  console.log('Permission System: Secure mode (only safe tools allowed by default)\n')
+
+  const queryLoop = createQueryLoop(builtinTools, {
+    maxTurns: 5,
+    permissionSystem: permissions,
+  }, adapter)
+
+  const prompt = 'List files in the current directory using Bash'
   console.log(`User: ${prompt}\n`)
   console.log('Assistant (streaming):\n')
 
@@ -33,6 +40,9 @@ async function main() {
         break
       case 'tool_progress':
         console.log(`[PROGRESS]: ${event.content.slice(0, 50)}...`)
+        break
+      case 'tool_denied':
+        console.log(`\n[DENIED]: ${event.reason}`)
         break
       case 'tool_result':
         console.log(`[TOOL RESULT]: ${event.result.content.slice(0, 100)}...`)
