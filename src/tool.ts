@@ -1,6 +1,7 @@
 export type ToolContext = {
   abortSignal: AbortSignal
   toolState: Map<string, unknown>
+  onProgress?: (content: string) => void
 }
 
 export type Tool = {
@@ -176,6 +177,7 @@ export const BashTool = buildTool({
       const { execSync } = await import('child_process')
       const command = input.command as string
       const stdout = String(execSync(command, { encoding: 'utf-8', timeout: 30000 }))
+      context.onProgress?.(`Output: ${stdout.slice(0, 100)}...\n`)
       return { result: { stdout, stderr: '' } }
     } catch (error) {
       const err = error as { stdout?: string; stderr?: string; message?: string }

@@ -31,6 +31,9 @@ async function main() {
       case 'tool_use':
         console.log(`\n\n[TOOL CALL: ${event.toolCall.name}]`)
         break
+      case 'tool_progress':
+        console.log(`[PROGRESS]: ${event.content.slice(0, 50)}...`)
+        break
       case 'tool_result':
         console.log(`[TOOL RESULT]: ${event.result.content.slice(0, 100)}...`)
         break

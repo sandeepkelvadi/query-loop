@@ -29,6 +29,7 @@ export type MessageStreamEvent =
   | { type: 'assistant'; content: string }
   | { type: 'assistant_delta'; delta: string }
   | { type: 'tool_use'; toolCall: ToolUseBlock }
+  | { type: 'tool_progress'; toolUseId: string; content: string }
   | { type: 'tool_result'; result: ToolResultBlock }
   | { type: 'turn_end'; turnCount: number }
   | { type: 'complete'; finalContent: string }
@@ -203,19 +204,25 @@ export class QueryLoop {
         toolState: new Map(),
       }
 
-      const toolResults = await this.executor.runToolUseBlocks(
+      const toolResultIterator = this.executor.runToolUseBlocks(
         toolCalls,
         this.tools,
         toolContext
       )
 
-      for (const result of toolResults) {
-        yield { type: 'tool_result', result }
-        this.state.messages.push(createToolResultMessage(
-          result.toolUseId,
-          result.content,
-          result.isError
-        ))
+      let toolResults: ToolResultBlock[] = []
+      for await (const event of toolResultIterator) {
+        if (event.type === 'progress') {
+          yield { type: 'tool_progress', toolUseId: event.toolUseId, content: event.content }
+        } else if (event.type === 'complete') {
+          toolResults.push(event.result)
+          yield { type: 'tool_result', result: event.result }
+          this.state.messages.push(createToolResultMessage(
+            event.result.toolUseId,
+            event.result.content,
+            event.result.isError
+          ))
+        }
       }
 
       yield { type: 'turn_end', turnCount: this.state.turnCount }
