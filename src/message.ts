@@ -41,6 +41,7 @@ export function extractToolUseBlocks(message: Message): ToolUseBlock[] {
       block.type === 'tool_use'
     )
     .map(block => ({
+      type: 'tool_use' as const,
       id: block.id,
       name: block.name,
       input: block.input,

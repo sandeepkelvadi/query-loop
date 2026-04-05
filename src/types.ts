@@ -14,6 +14,7 @@ export type ContentBlock =
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
 
 export type ToolUseBlock = {
+  type: 'tool_use'
   id: string
   name: string
   input: Record<string, unknown>

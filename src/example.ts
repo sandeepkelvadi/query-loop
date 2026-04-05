@@ -8,34 +8,38 @@ async function main() {
     process.exit(1)
   }
 
-  console.log('=== Query Loop with Anthropic Adapter ===\n')
+  console.log('=== Query Loop with Streaming ===\n')
 
   const adapter = createAnthropicAdapter({ apiKey })
   const queryLoop = createQueryLoop(builtinTools, { maxTurns: 5 }, adapter)
 
-  const prompt = 'Say hello and tell me the current date'
+  const prompt = 'Say hello and tell me the current date and time'
   console.log(`User: ${prompt}\n`)
-  console.log('Assistant:\n')
+  console.log('Assistant (streaming):\n')
 
   let fullResponse = ''
 
   for await (const event of queryLoop.query([], prompt)) {
     switch (event.type) {
       case 'assistant':
-        fullResponse += event.content
-        process.stdout.write(event.content)
+        fullResponse = event.content
+        break
+      case 'assistant_delta':
+        fullResponse += event.delta
+        process.stdout.write(event.delta)
         break
       case 'tool_use':
-        console.log(`\n[TOOL CALL: ${event.toolCall.name}]`)
+        console.log(`\n\n[TOOL CALL: ${event.toolCall.name}]`)
         break
       case 'tool_result':
-        console.log(`\n[TOOL RESULT]: ${event.result.content.slice(0, 100)}...`)
+        console.log(`[TOOL RESULT]: ${event.result.content.slice(0, 100)}...`)
         break
       case 'turn_end':
         console.log('\n[Turn complete]')
         break
       case 'complete':
         console.log(`\n\n=== DONE ===`)
+        console.log(`Final response: ${event.finalContent.slice(0, 100)}...`)
         break
     }
   }

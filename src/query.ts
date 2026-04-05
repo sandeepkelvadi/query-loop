@@ -16,8 +16,18 @@ type QueryState = {
   abortController: AbortController
 }
 
+export type LLMStreamEvent =
+  | { type: 'text_delta'; delta: string }
+  | { type: 'text_complete'; text: string }
+  | { type: 'tool_use_start'; toolCall: ToolUseBlock }
+  | { type: 'tool_use_delta'; toolCallId: string; delta: string }
+  | { type: 'tool_use_complete'; toolCall: ToolUseBlock }
+  | { type: 'turn_end'; turnCount: number }
+  | { type: 'complete'; finalContent: string }
+
 export type MessageStreamEvent =
   | { type: 'assistant'; content: string }
+  | { type: 'assistant_delta'; delta: string }
   | { type: 'tool_use'; toolCall: ToolUseBlock }
   | { type: 'tool_result'; result: ToolResultBlock }
   | { type: 'turn_end'; turnCount: number }
@@ -28,7 +38,20 @@ abstract class BaseModelAdapter {
     messages: Message[],
     tools: Tool[],
     config: QueryOptions
-  ): Promise<{ message: Message; rawEvents?: unknown[] }>
+  ): Promise<{ message: Message }>
+
+  async *stream(
+    _messages: Message[],
+    _tools: Tool[],
+    _config: QueryOptions
+  ): AsyncGenerator<LLMStreamEvent, Message, unknown> {
+    const { message } = await this.complete(_messages, _tools, _config)
+    const text = typeof message.content === 'string'
+      ? message.content
+      : messageToString(message)
+    yield { type: 'text_complete', text }
+    return message
+  }
 }
 
 class MockModelAdapter extends BaseModelAdapter {
@@ -36,14 +59,14 @@ class MockModelAdapter extends BaseModelAdapter {
     messages: Message[],
     _tools: Tool[],
     _config: QueryOptions
-  ): Promise<{ message: Message; rawEvents?: unknown[] }> {
+  ): Promise<{ message: Message }> {
     const lastMessage = messages[messages.length - 1]
-    const userContent = typeof lastMessage?.content === 'string' 
-      ? lastMessage.content 
+    const userContent = typeof lastMessage?.content === 'string'
+      ? lastMessage.content
       : 'No content'
 
     const content = `Echo: ${userContent}`
-    
+
     return {
       message: {
         id: randomUUID(),
@@ -107,30 +130,73 @@ export class QueryLoop {
 
       this.state.turnCount++
 
-      const { message } = await this.modelAdapter.complete(
+      let fullText = ''
+      let toolCalls: ToolUseBlock[] = []
+      let streamingToolInput = ''
+      let currentToolCall: ToolUseBlock | null = null
+
+      for await (const event of this.modelAdapter.stream(
         this.state.messages,
         this.tools,
         this.config
-      )
+      )) {
+        if (event.type === 'text_delta') {
+          fullText += event.delta
+          yield { type: 'assistant_delta', delta: event.delta }
+        }
 
-      this.state.messages.push(message)
+        if (event.type === 'text_complete') {
+          fullText = event.text
+          yield { type: 'assistant', content: event.text }
+        }
 
-      const content = typeof message.content === 'string'
-        ? message.content
-        : messageToString(message)
+        if (event.type === 'tool_use_start') {
+          currentToolCall = event.toolCall
+          streamingToolInput = ''
+          yield { type: 'tool_use', toolCall: event.toolCall }
+        }
 
-      yield { type: 'assistant', content }
+        if (event.type === 'tool_use_delta' && currentToolCall) {
+          streamingToolInput += event.delta
+          currentToolCall.input = this.parsePartialJson(streamingToolInput)
+        }
 
-      const toolCalls = extractToolUseBlocks(message)
+        if (event.type === 'tool_use_complete' && currentToolCall) {
+          currentToolCall.input = this.parsePartialJson(streamingToolInput)
+          toolCalls.push(currentToolCall)
+          currentToolCall = null
+          streamingToolInput = ''
+        }
+      }
+
+      if (toolCalls.length === 0 && fullText) {
+        const message: Message = {
+          id: randomUUID(),
+          role: 'assistant',
+          content: fullText,
+          timestamp: Date.now(),
+        }
+        this.state.messages.push(message)
+        yield { type: 'complete', finalContent: fullText }
+        return fullText
+      }
 
       if (toolCalls.length === 0) {
+        const lastMsg = this.state.messages[this.state.messages.length - 1]
+        const content = typeof lastMsg?.content === 'string'
+          ? lastMsg.content
+          : messageToString(lastMsg)
         yield { type: 'complete', finalContent: content }
         return content
       }
 
-      for (const toolCall of toolCalls) {
-        yield { type: 'tool_use', toolCall }
+      const assistantMessage: Message = {
+        id: randomUUID(),
+        role: 'assistant',
+        content: toolCalls,
+        timestamp: Date.now(),
       }
+      this.state.messages.push(assistantMessage)
 
       const toolContext: ToolContext = {
         abortSignal: this.state.abortController.signal,
@@ -162,6 +228,14 @@ export class QueryLoop {
 
     yield { type: 'complete', finalContent }
     return finalContent
+  }
+
+  private parsePartialJson(input: string): Record<string, unknown> {
+    try {
+      return JSON.parse(input)
+    } catch {
+      return { _partial: input }
+    }
   }
 
   abort(): void {
